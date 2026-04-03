@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI IMAGE MAP</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@300;400;700&display=swap');
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --hf-color: #3b82f6;
+      --gem-color: #22c55e;
+      --edited-color: #f97316;
+      --line-same-date: #3b82f6;
+      --line-same-uuid: #ef4444;
+      --line-same-ext: #a855f7;
+      --bg: #f5f4ef;
+      --text: #111;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 18px 28px 14px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #header h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(28px, 5vw, 64px);
+      font-weight: 700;
+      line-height: 0.92;
+      letter-spacing: -0.03em;
+      text-transform: uppercase;
+    }
+
+    #header .sub {
+      font-size: 10px;
+      font-weight: 400;
+      color: #666;
+      margin-top: 6px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    #legend {
+      position: fixed;
+      bottom: 20px;
+      left: 28px;
+      font-size: 10px;
+      z-index: 100;
+      pointer-events: none;
+      line-height: 2;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .legend-line {
+      width: 24px;
+      height: 2px;
+      flex-shrink: 0;
+    }
+
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      right: 28px;
+      display: flex;
+      gap: 8px;
+      z-index: 100;
+    }
+
+    .ctrl-btn {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      padding: 6px 12px;
+      border: 1px solid #999;
+      background: rgba(245, 244, 239, 0.85);
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: background 0.15s;
+    }
+
+    .ctrl-btn:hover {
+      background: #111;
+      color: #f5f4ef;
+      border-color: #111;
+    }
+
+    .ctrl-btn.active {
+      background: #111;
+      color: #f5f4ef;
+      border-color: #111;
+    }
+
+    #canvas-wrap {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      overflow: hidden;
+    }
+
+    svg#lines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .node {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .node:hover {
+      z-index: 50 !important;
+    }
+
+
+
+    #tooltip {
+      position: fixed;
+      background: #fff;
+      border: 1px solid #111;
+      padding: 0;
+      z-index: 200;
+      pointer-events: none;
+      display: none;
+      max-width: 220px;
+      box-shadow: 3px 3px 0 #111;
+    }
+
+    #tooltip img {
+      width: 220px;
+      height: 160px;
+      object-fit: cover;
+      display: block;
+    }
+
+    #tooltip .tt-body {
+      padding: 8px 10px;
+      font-size: 9px;
+      line-height: 1.6;
+      color: #333;
+    }
+
+    #tooltip .tt-name {
+      font-weight: 600;
+      font-size: 9px;
+      color: #111;
+      word-break: break-all;
+      margin-bottom: 4px;
+    }
+
+    #tooltip .tt-err {
+      width: 220px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f0f0f0;
+      font-size: 20px;
+    }
+
+    #sort-label {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(60px, 12vw, 140px);
+      font-weight: 700;
+      text-transform: uppercase;
+      color: rgba(0, 0, 0, 0.04);
+      letter-spacing: -0.04em;
+      pointer-events: none;
+      z-index: 0;
+      white-space: nowrap;
+      transition: opacity 0.4s;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="header">
+    <div>
+      <h1>AI Image Workload Visualizer</h1>
+      <div class="sub" id="count-label"></div>
+    </div>
+  </div>
+
+
+
+  <div id="legend">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#ef4444"></div> SUN
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#f97316"></div> MON
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#eab308"></div> TUE
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#22c55e"></div> WED
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#3b82f6"></div> THU
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#6366f1"></div> FRI
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#a855f7"></div> SAT
+    </div>
+    <div class="legend-item" style="margin-top:6px">
+      <div class="legend-line" style="background:#9ca3af"></div> 같은 요일
+    </div>
+    <div style="margin-top:8px; color:#888">● 크기 = 파일 용량 (크기가 클수록 원이 큼)</div>
+  </div>
+
+
+  <div id="canvas-wrap">
+    <svg id="lines"></svg>
+    <div id="nodes"></div>
+  </div>
+
+  <div id="tooltip">
+    <div id="tt-img-wrap"></div>
+    <div class="tt-body">
+      <div class="tt-name" id="tt-name"></div>
+      <div id="tt-info"></div>
+    </div>
+  </div>
+
+  <script>
+    const DB = { "metadata": { "source_directory": "/Users/wond_erwall/Downloads", "generated_at": "2026-03-27", "total_records": 151, "hf_count": 75, "gemini_count": 76, "description": "AI 생성 이미지 파일 DB (Higgisfield + Gemini)" }, "files": [{ "id": 1, "filename": "hf_20260326_042839_ad68e7b9-b501-4e58-bce6-beb2955b08b8-Photoroom.png", "source": "Higgisfield", "date": "2026-03-26", "time": "04:28:39", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260326_042839_ad68e7b9-b501-4e58-bce6-beb2955b08b8-Photoroom.png", "size": 750078 }, { "id": 2, "filename": "hf_20260326_042839_ad68e7b9-b501-4e58-bce6-beb2955b08b8.jpeg", "source": "Higgisfield", "date": "2026-03-26", "time": "04:28:39", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260326_042839_ad68e7b9-b501-4e58-bce6-beb2955b08b8.jpeg", "size": 2027665 }, { "id": 3, "filename": "hf_20260326_043141_55ea01fd-2ce5-43ab-88b0-669695d89b2b.png", "source": "Higgisfield", "date": "2026-03-26", "time": "04:31:41", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260326_043141_55ea01fd-2ce5-43ab-88b0-669695d89b2b.png", "size": 3682326 }, { "id": 4, "filename": "hf_20260323_130043_8b3ce520-b12c-43ca-a326-67a13db1830b-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:00:43", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_130043_8b3ce520-b12c-43ca-a326-67a13db1830b-Photoroom.png", "size": 1248202 }, { "id": 5, "filename": "hf_20260323_130043_8b3ce520-b12c-43ca-a326-67a13db1830b.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:00:43", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_130043_8b3ce520-b12c-43ca-a326-67a13db1830b.jpeg", "size": 639993 }, { "id": 6, "filename": "hf_20260323_130451_b846eb28-c7a5-4625-bd63-2bdf7c1bed87-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:04:51", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_130451_b846eb28-c7a5-4625-bd63-2bdf7c1bed87-Photoroom.png", "size": 1175498 }, { "id": 7, "filename": "hf_20260323_130451_b846eb28-c7a5-4625-bd63-2bdf7c1bed87.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:04:51", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_130451_b846eb28-c7a5-4625-bd63-2bdf7c1bed87.jpeg", "size": 594922 }, { "id": 8, "filename": "hf_20260323_130515_b402f7a0-2648-4766-a6a6-0a1f554c5996-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:05:15", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_130515_b402f7a0-2648-4766-a6a6-0a1f554c5996-Photoroom.png", "size": 1251336 }, { "id": 9, "filename": "hf_20260323_130515_b402f7a0-2648-4766-a6a6-0a1f554c5996.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:05:15", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_130515_b402f7a0-2648-4766-a6a6-0a1f554c5996.png", "size": 5266075 }, { "id": 10, "filename": "hf_20260323_131110_a07aa36d-1ca4-4f64-8b37-591e9ffc7411-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:11:10", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_131110_a07aa36d-1ca4-4f64-8b37-591e9ffc7411-Photoroom.png", "size": 0 }, { "id": 11, "filename": "hf_20260323_131110_a07aa36d-1ca4-4f64-8b37-591e9ffc7411.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:11:10", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_131110_a07aa36d-1ca4-4f64-8b37-591e9ffc7411.jpeg", "size": 2193977 }, { "id": 12, "filename": "hf_20260323_133828_630f9f2e-6922-4927-b2c8-f4565d7679c6.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:38:28", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_133828_630f9f2e-6922-4927-b2c8-f4565d7679c6.png", "size": 4883981 }, { "id": 13, "filename": "hf_20260323_134244_ee44ef46-5c9f-49a6-8f84-aa80d82db351.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:42:44", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_134244_ee44ef46-5c9f-49a6-8f84-aa80d82db351.jpeg", "size": 1726979 }, { "id": 14, "filename": "hf_20260323_134457_d1d9178f-7431-4c11-bba9-8fdd8f8053f1.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:44:57", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_134457_d1d9178f-7431-4c11-bba9-8fdd8f8053f1.jpeg", "size": 2152475 }, { "id": 15, "filename": "hf_20260323_135316_35ba96ef-051f-4923-8e3b-47bf88752c09-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:53:16", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_135316_35ba96ef-051f-4923-8e3b-47bf88752c09-Photoroom.png", "size": 1123491 }, { "id": 16, "filename": "hf_20260323_135316_35ba96ef-051f-4923-8e3b-47bf88752c09.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:53:16", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_135316_35ba96ef-051f-4923-8e3b-47bf88752c09.png", "size": 5452364 }, { "id": 17, "filename": "hf_20260323_135600_4416e1df-1f0f-4583-8857-ace98f57ccfd-Photoroom.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:56:00", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260323_135600_4416e1df-1f0f-4583-8857-ace98f57ccfd-Photoroom.png", "size": 1115996 }, { "id": 18, "filename": "hf_20260323_135600_4416e1df-1f0f-4583-8857-ace98f57ccfd.jpeg", "source": "Higgisfield", "date": "2026-03-23", "time": "13:56:00", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_135600_4416e1df-1f0f-4583-8857-ace98f57ccfd.jpeg", "size": 2040231 }, { "id": 19, "filename": "hf_20260323_135600_952276ac-6c17-408d-b4b7-8f9ccd47afb6.png", "source": "Higgisfield", "date": "2026-03-23", "time": "13:56:00", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260323_135600_952276ac-6c17-408d-b4b7-8f9ccd47afb6.png", "size": 5603522 }, { "id": 20, "filename": "hf_20260321_091747_fc657598-b51f-4fd3-8935-a59e9794c2b7-Photoroom.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:17:47", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260321_091747_fc657598-b51f-4fd3-8935-a59e9794c2b7-Photoroom.png", "size": 1212966 }, { "id": 21, "filename": "hf_20260321_091747_fc657598-b51f-4fd3-8935-a59e9794c2b7.jpeg", "source": "Higgisfield", "date": "2026-03-21", "time": "09:17:47", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_091747_fc657598-b51f-4fd3-8935-a59e9794c2b7.jpeg", "size": 2809532 }, { "id": 22, "filename": "hf_20260321_092254_ea784149-0edd-4b80-86d9-04a6d32a51cf.jpeg", "source": "Higgisfield", "date": "2026-03-21", "time": "09:22:54", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_092254_ea784149-0edd-4b80-86d9-04a6d32a51cf.jpeg", "size": 2272601 }, { "id": 23, "filename": "hf_20260321_092323_fae7aed1-6442-4684-8060-b92911f2671c.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:23:23", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_092323_fae7aed1-6442-4684-8060-b92911f2671c.png", "size": 4261796 }, { "id": 24, "filename": "hf_20260321_092945_5e620265-03ce-4a5c-a144-948df1b583d4-Photoroom.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:29:45", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260321_092945_5e620265-03ce-4a5c-a144-948df1b583d4-Photoroom.png", "size": 573083 }, { "id": 25, "filename": "hf_20260321_092945_5e620265-03ce-4a5c-a144-948df1b583d4.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:29:45", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_092945_5e620265-03ce-4a5c-a144-948df1b583d4.png", "size": 5079993 }, { "id": 26, "filename": "hf_20260321_093431_234b747f-df5e-4451-becb-e9b0a7cce1a2.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:34:31", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_093431_234b747f-df5e-4451-becb-e9b0a7cce1a2.png", "size": 2412404 }, { "id": 27, "filename": "hf_20260321_093910_33a29539-f708-4b08-82f1-24337d230fdb.png", "source": "Higgisfield", "date": "2026-03-21", "time": "09:39:10", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_093910_33a29539-f708-4b08-82f1-24337d230fdb.png", "size": 5639049 }, { "id": 28, "filename": "hf_20260321_101009_f99a455c-edcb-4932-9b3f-0393837dbd14.jpeg", "source": "Higgisfield", "date": "2026-03-21", "time": "10:10:09", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260321_101009_f99a455c-edcb-4932-9b3f-0393837dbd14.jpeg", "size": 1323186 }, { "id": 29, "filename": "hf_20260318_055430_ca6aeb5e-9e12-4c25-a775-89797d27eefd-Photoroom.png", "source": "Higgisfield", "date": "2026-03-18", "time": "05:54:30", "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/hf_20260318_055430_ca6aeb5e-9e12-4c25-a775-89797d27eefd-Photoroom.png", "size": 723842 }, { "id": 30, "filename": "hf_20260318_055430_ca6aeb5e-9e12-4c25-a775-89797d27eefd.jpeg", "source": "Higgisfield", "date": "2026-03-18", "time": "05:54:30", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_055430_ca6aeb5e-9e12-4c25-a775-89797d27eefd.jpeg", "size": 2186450 }, { "id": 31, "filename": "hf_20260318_065848_f2be3ed4-8500-4616-98c7-13f04342de52.png", "source": "Higgisfield", "date": "2026-03-18", "time": "06:58:48", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_065848_f2be3ed4-8500-4616-98c7-13f04342de52.png", "size": 2871298 }, { "id": 32, "filename": "hf_20260318_070703_1937f809-8074-4783-9376-7e1aa2cc9fa7.png", "source": "Higgisfield", "date": "2026-03-18", "time": "07:07:03", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_070703_1937f809-8074-4783-9376-7e1aa2cc9fa7.png", "size": 2931464 }, { "id": 33, "filename": "hf_20260318_072216_2fe7e956-6fb3-4010-a04a-4bec4c36b48a.png", "source": "Higgisfield", "date": "2026-03-18", "time": "07:22:16", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_072216_2fe7e956-6fb3-4010-a04a-4bec4c36b48a.png", "size": 3350336 }, { "id": 34, "filename": "hf_20260318_072806_4934ec27-c90b-40b5-b402-eb44f60ba357.png", "source": "Higgisfield", "date": "2026-03-18", "time": "07:28:06", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_072806_4934ec27-c90b-40b5-b402-eb44f60ba357.png", "size": 3365079 }, { "id": 35, "filename": "hf_20260318_100350_596ba2c8-e48e-4bc8-b376-95299db7e88f.png", "source": "Higgisfield", "date": "2026-03-18", "time": "10:03:50", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_100350_596ba2c8-e48e-4bc8-b376-95299db7e88f.png", "size": 2442064 }, { "id": 36, "filename": "hf_20260318_102142_ba007e2c-a63e-4c4d-a331-b9ce0152c938.png", "source": "Higgisfield", "date": "2026-03-18", "time": "10:21:42", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_102142_ba007e2c-a63e-4c4d-a331-b9ce0152c938.png", "size": 2215706 }, { "id": 37, "filename": "hf_20260318_102226_f34e2374-4aab-4e5f-8651-5ffc4dfdbb34.png", "source": "Higgisfield", "date": "2026-03-18", "time": "10:22:26", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_102226_f34e2374-4aab-4e5f-8651-5ffc4dfdbb34.png", "size": 3728354 }, { "id": 38, "filename": "hf_20260318_104843_0e208cf6-9cd0-4f3c-9519-435a26ed5476.jpeg", "source": "Higgisfield", "date": "2026-03-18", "time": "10:48:43", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_104843_0e208cf6-9cd0-4f3c-9519-435a26ed5476.jpeg", "size": 2361003 }, { "id": 39, "filename": "hf_20260318_104843_0e208cf6-9cd0-4f3c-9519-435a26ed5476.png", "source": "Higgisfield", "date": "2026-03-18", "time": "10:48:43", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_104843_0e208cf6-9cd0-4f3c-9519-435a26ed5476.png", "size": 7591730 }, { "id": 40, "filename": "hf_20260318_104957_b055bf27-65f4-4e9d-898c-42d2ddb6edd1.jpeg", "source": "Higgisfield", "date": "2026-03-18", "time": "10:49:57", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_104957_b055bf27-65f4-4e9d-898c-42d2ddb6edd1.jpeg", "size": 2329215 }, { "id": 41, "filename": "hf_20260318_105234_c7c5c2a9-c9d5-47cf-98d7-7ab9f1a1234d.jpeg", "source": "Higgisfield", "date": "2026-03-18", "time": "10:52:34", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_105234_c7c5c2a9-c9d5-47cf-98d7-7ab9f1a1234d.jpeg", "size": 2398363 }, { "id": 42, "filename": "hf_20260318_130857_85a38d23-ac56-4869-bcfc-bf09dfb3f40b.mp4", "source": "Higgisfield", "date": "2026-03-18", "time": "13:08:57", "ext": "mp4", "mime_type": "video/mp4", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260318_130857_85a38d23-ac56-4869-bcfc-bf09dfb3f40b.mp4", "size": 0 }, { "id": 43, "filename": "hf_20260317_160656_860e7c79-eb5d-4137-825a-3d13eba7e474.jpeg", "source": "Higgisfield", "date": "2026-03-17", "time": "16:06:56", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260317_160656_860e7c79-eb5d-4137-825a-3d13eba7e474.jpeg", "size": 0 }, { "id": 44, "filename": "hf_20260317_160656_860e7c79-eb5d-4137-825a-3d13eba7e474.png", "source": "Higgisfield", "date": "2026-03-17", "time": "16:06:56", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260317_160656_860e7c79-eb5d-4137-825a-3d13eba7e474.png", "size": 0 }, { "id": 45, "filename": "hf_20260317_161549_847481ca-4595-433d-b818-86f154dd709f.jpeg", "source": "Higgisfield", "date": "2026-03-17", "time": "16:15:49", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260317_161549_847481ca-4595-433d-b818-86f154dd709f.jpeg", "size": 0 }, { "id": 46, "filename": "hf_20260317_161828_b302ea3b-bc27-4828-89fc-8c4090faa9f8.jpeg", "source": "Higgisfield", "date": "2026-03-17", "time": "16:18:28", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260317_161828_b302ea3b-bc27-4828-89fc-8c4090faa9f8.jpeg", "size": 0 }, { "id": 47, "filename": "hf_20260317_173459_5d5c11cc-2fd8-404c-88c3-e24dd5cace36.png", "source": "Higgisfield", "date": "2026-03-17", "time": "17:34:59", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260317_173459_5d5c11cc-2fd8-404c-88c3-e24dd5cace36.png", "size": 0 }, { "id": 48, "filename": "hf_20260316_052404_9d5949f4-147a-42f9-9b9d-75f07a76f3e5.jpeg", "source": "Higgisfield", "date": "2026-03-16", "time": "05:24:04", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_052404_9d5949f4-147a-42f9-9b9d-75f07a76f3e5.jpeg", "size": 0 }, { "id": 49, "filename": "hf_20260316_054649_86ccb285-6bcc-4b99-823d-7fccbc48d0b4.jpeg", "source": "Higgisfield", "date": "2026-03-16", "time": "05:46:49", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_054649_86ccb285-6bcc-4b99-823d-7fccbc48d0b4.jpeg", "size": 0 }, { "id": 50, "filename": "hf_20260316_060721_02a02cfe-8b49-457d-8f95-850e4d868531.jpeg", "source": "Higgisfield", "date": "2026-03-16", "time": "06:07:21", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_060721_02a02cfe-8b49-457d-8f95-850e4d868531.jpeg", "size": 0 }, { "id": 51, "filename": "hf_20260316_070209_ffe792fa-1824-4ccb-930a-e79fca95e3b1.png", "source": "Higgisfield", "date": "2026-03-16", "time": "07:02:09", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_070209_ffe792fa-1824-4ccb-930a-e79fca95e3b1.png", "size": 0 }, { "id": 52, "filename": "hf_20260316_131623_7dae25c1-8adf-47f3-81f5-e393aae8aaca.jpeg", "source": "Higgisfield", "date": "2026-03-16", "time": "13:16:23", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_131623_7dae25c1-8adf-47f3-81f5-e393aae8aaca.jpeg", "size": 0 }, { "id": 53, "filename": "hf_20260316_131636_f79ae46e-7d4a-4f4a-ae3b-81c2b1d571db.jpeg", "source": "Higgisfield", "date": "2026-03-16", "time": "13:16:36", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260316_131636_f79ae46e-7d4a-4f4a-ae3b-81c2b1d571db.jpeg", "size": 0 }, { "id": 54, "filename": "hf_20260315_014735_2373f344-d5c9-489b-893e-857060e16c1c.jpeg", "source": "Higgisfield", "date": "2026-03-15", "time": "01:47:35", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260315_014735_2373f344-d5c9-489b-893e-857060e16c1c.jpeg", "size": 0 }, { "id": 55, "filename": "hf_20260315_015134_8265089f-8d50-4d90-8c99-863a06df229b.png", "source": "Higgisfield", "date": "2026-03-15", "time": "01:51:34", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260315_015134_8265089f-8d50-4d90-8c99-863a06df229b.png", "size": 0 }, { "id": 56, "filename": "hf_20260315_162040_26630460-0116-43ac-9189-72764e8f0f02.jpeg", "source": "Higgisfield", "date": "2026-03-15", "time": "16:20:40", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260315_162040_26630460-0116-43ac-9189-72764e8f0f02.jpeg", "size": 0 }, { "id": 57, "filename": "hf_20260315_165644_5c00b2dc-4657-442e-98b5-3e14e4a1eaca.png", "source": "Higgisfield", "date": "2026-03-15", "time": "16:56:44", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260315_165644_5c00b2dc-4657-442e-98b5-3e14e4a1eaca.png", "size": 0 }, { "id": 58, "filename": "hf_20260314_073806_f01e5d29-a7e2-4e6c-aace-68a8c58138c2.png", "source": "Higgisfield", "date": "2026-03-14", "time": "07:38:06", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260314_073806_f01e5d29-a7e2-4e6c-aace-68a8c58138c2.png", "size": 1253463 }, { "id": 59, "filename": "hf_20260314_080609_aa433bdf-7d13-4d7a-a5a6-da0881f28e3b.png", "source": "Higgisfield", "date": "2026-03-14", "time": "08:06:09", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260314_080609_aa433bdf-7d13-4d7a-a5a6-da0881f28e3b.png", "size": 19380159 }, { "id": 60, "filename": "hf_20260314_082352_a91aa8e9-c78d-4ecd-9b29-0f6857c5e843.png", "source": "Higgisfield", "date": "2026-03-14", "time": "08:23:52", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260314_082352_a91aa8e9-c78d-4ecd-9b29-0f6857c5e843.png", "size": 16571573 }, { "id": 61, "filename": "hf_20260314_093026_0934309f-7649-4ba9-a5d7-06568fa83ba6.jpeg", "source": "Higgisfield", "date": "2026-03-14", "time": "09:30:26", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260314_093026_0934309f-7649-4ba9-a5d7-06568fa83ba6.jpeg", "size": 2012638 }, { "id": 62, "filename": "hf_20260314_093734_d4dd3096-7809-43f0-b8d3-ed1f23e1abcd.png", "source": "Higgisfield", "date": "2026-03-14", "time": "09:37:34", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260314_093734_d4dd3096-7809-43f0-b8d3-ed1f23e1abcd.png", "size": 8658595 }, { "id": 63, "filename": "hf_20260313_185409_13d30a16-afa5-4f25-b397-b8a51f963886.jpeg", "source": "Higgisfield", "date": "2026-03-13", "time": "18:54:09", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260313_185409_13d30a16-afa5-4f25-b397-b8a51f963886.jpeg", "size": 0 }, { "id": 64, "filename": "hf_20260313_190108_988320cd-79be-4503-8f62-842f4c88aec0.jpeg", "source": "Higgisfield", "date": "2026-03-13", "time": "19:01:08", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260313_190108_988320cd-79be-4503-8f62-842f4c88aec0.jpeg", "size": 0 }, { "id": 65, "filename": "hf_20260313_192800_7843176d-7198-422d-b103-81e969f8f380.png", "source": "Higgisfield", "date": "2026-03-13", "time": "19:28:00", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260313_192800_7843176d-7198-422d-b103-81e969f8f380.png", "size": 0 }, { "id": 66, "filename": "hf_20260313_193416_1d5fc7b6-2ab9-41a4-a5eb-6eb144165468.jpeg", "source": "Higgisfield", "date": "2026-03-13", "time": "19:34:16", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260313_193416_1d5fc7b6-2ab9-41a4-a5eb-6eb144165468.jpeg", "size": 0 }, { "id": 67, "filename": "hf_20260311_135935_f91412de-efb4-42c1-8ccf-10e6a30dc31d.jpeg", "source": "Higgisfield", "date": "2026-03-11", "time": "13:59:35", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260311_135935_f91412de-efb4-42c1-8ccf-10e6a30dc31d.jpeg", "size": 2541488 }, { "id": 68, "filename": "hf_20260311_144301_a3eba23d-c1f5-44bb-90d2-983d4d965a6e.png", "source": "Higgisfield", "date": "2026-03-11", "time": "14:43:01", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260311_144301_a3eba23d-c1f5-44bb-90d2-983d4d965a6e.png", "size": 5662024 }, { "id": 69, "filename": "hf_20260311_151511_e68e7f58-04f8-49e3-b570-defc06368fd5.png", "source": "Higgisfield", "date": "2026-03-11", "time": "15:15:11", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260311_151511_e68e7f58-04f8-49e3-b570-defc06368fd5.png", "size": 5818294 }, { "id": 70, "filename": "hf_20260310_111243_775ff102-298c-40a0-b28f-2e839f088c27.jpeg", "source": "Higgisfield", "date": "2026-03-10", "time": "11:12:43", "ext": "jpeg", "mime_type": "image/jpeg", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260310_111243_775ff102-298c-40a0-b28f-2e839f088c27.jpeg", "size": 1994568 }, { "id": 71, "filename": "hf_20260308_061042_7ca0b2cb-d6a9-4cac-921e-dedd546de301.png", "source": "Higgisfield", "date": "2026-03-08", "time": "06:10:42", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260308_061042_7ca0b2cb-d6a9-4cac-921e-dedd546de301.png", "size": 836284 }, { "id": 72, "filename": "hf_20260308_063907_9103a689-a12e-4310-a08d-1ab78dd39b24.png", "source": "Higgisfield", "date": "2026-03-08", "time": "06:39:07", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260308_063907_9103a689-a12e-4310-a08d-1ab78dd39b24.png", "size": 6390186 }, { "id": 73, "filename": "hf_20260302_044500_1d62b293-ef36-4700-a283-37a7f7ddece6.png", "source": "Higgisfield", "date": "2026-03-02", "time": "04:45:00", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260302_044500_1d62b293-ef36-4700-a283-37a7f7ddece6.png", "size": 3915966 }, { "id": 74, "filename": "hf_20260302_071040_9752867a-2dfc-4ecf-9e96-ee241bc682cb.png", "source": "Higgisfield", "date": "2026-03-02", "time": "07:10:40", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260302_071040_9752867a-2dfc-4ecf-9e96-ee241bc682cb.png", "size": 6573176 }, { "id": 75, "filename": "hf_20260302_082244_d606b224-e1d2-4a93-a95d-3c68a0613e92.png", "source": "Higgisfield", "date": "2026-03-02", "time": "08:22:44", "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/hf_20260302_082244_d606b224-e1d2-4a93-a95d-3c68a0613e92.png", "size": 5815898 }, { "id": 76, "filename": "Gemini_Generated_Image_1mn2gi1mn2gi1mn2.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_1mn2gi1mn2gi1mn2.png", "size": 3379321 }, { "id": 77, "filename": "Gemini_Generated_Image_1o36ai1o36ai1o36.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_1o36ai1o36ai1o36.png", "size": 2244538 }, { "id": 78, "filename": "Gemini_Generated_Image_4is5044is5044is5.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_4is5044is5044is5.png", "size": 1611747 }, { "id": 79, "filename": "Gemini_Generated_Image_4p58k54p58k54p58.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_4p58k54p58k54p58.png", "size": 5811501 }, { "id": 80, "filename": "Gemini_Generated_Image_4tgdth4tgdth4tgd.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_4tgdth4tgdth4tgd.png", "size": 9509346 }, { "id": 81, "filename": "Gemini_Generated_Image_4z9k4z4z9k4z4z9k.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_4z9k4z4z9k4z4z9k.png", "size": 754174 }, { "id": 82, "filename": "Gemini_Generated_Image_56txfi56txfi56tx.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_56txfi56txfi56tx.png", "size": 7539862 }, { "id": 83, "filename": "Gemini_Generated_Image_5alhe15alhe15alh.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_5alhe15alhe15alh.png", "size": 5164493 }, { "id": 84, "filename": "Gemini_Generated_Image_5j5c1a5j5c1a5j5c.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_5j5c1a5j5c1a5j5c.png", "size": 5066759 }, { "id": 85, "filename": "Gemini_Generated_Image_5raxlf5raxlf5rax.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_5raxlf5raxlf5rax.png", "size": 5444321 }, { "id": 86, "filename": "Gemini_Generated_Image_5u9mjc5u9mjc5u9m.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_5u9mjc5u9mjc5u9m.png", "size": 2976185 }, { "id": 87, "filename": "Gemini_Generated_Image_69dhb769dhb769dh.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_69dhb769dhb769dh.png", "size": 7523275 }, { "id": 88, "filename": "Gemini_Generated_Image_73dan773dan773da.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_73dan773dan773da.png", "size": 5916334 }, { "id": 89, "filename": "Gemini_Generated_Image_76calb76calb76ca.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_76calb76calb76ca.png", "size": 5417132 }, { "id": 90, "filename": "Gemini_Generated_Image_76rz8d76rz8d76rz.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_76rz8d76rz8d76rz.png", "size": 1412738 }, { "id": 91, "filename": "Gemini_Generated_Image_7k7pgt7k7pgt7k7p-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_7k7pgt7k7pgt7k7p-Photoroom.png", "size": 1118977 }, { "id": 92, "filename": "Gemini_Generated_Image_7k7pgt7k7pgt7k7p.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_7k7pgt7k7pgt7k7p.png", "size": 6186311 }, { "id": 93, "filename": "Gemini_Generated_Image_85dvqy85dvqy85dv-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_85dvqy85dvqy85dv-Photoroom.png", "size": 523444 }, { "id": 94, "filename": "Gemini_Generated_Image_85dvqy85dvqy85dv.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_85dvqy85dvqy85dv.png", "size": 4318419 }, { "id": 95, "filename": "Gemini_Generated_Image_8dhbl58dhbl58dhb.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_8dhbl58dhbl58dhb.png", "size": 9669887 }, { "id": 96, "filename": "Gemini_Generated_Image_8io63z8io63z8io6.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_8io63z8io63z8io6.png", "size": 3301801 }, { "id": 97, "filename": "Gemini_Generated_Image_8x5d6x8x5d6x8x5d-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_8x5d6x8x5d6x8x5d-Photoroom.png", "size": 1028679 }, { "id": 98, "filename": "Gemini_Generated_Image_8x5d6x8x5d6x8x5d.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_8x5d6x8x5d6x8x5d.png", "size": 5291550 }, { "id": 99, "filename": "Gemini_Generated_Image_91aiu091aiu091ai.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_91aiu091aiu091ai.png", "size": 908086 }, { "id": 100, "filename": "Gemini_Generated_Image_95x65p95x65p95x6.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_95x65p95x65p95x6.png", "size": 6658166 }, { "id": 101, "filename": "Gemini_Generated_Image_9u88l19u88l19u88.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_9u88l19u88l19u88.png", "size": 2030886 }, { "id": 102, "filename": "Gemini_Generated_Image_a6yiwha6yiwha6yi.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_a6yiwha6yiwha6yi.png", "size": 7037105 }, { "id": 103, "filename": "Gemini_Generated_Image_a8vrq9a8vrq9a8vr.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_a8vrq9a8vrq9a8vr.png", "size": 7531709 }, { "id": 104, "filename": "Gemini_Generated_Image_azvhiyazvhiyazvh.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_azvhiyazvhiyazvh.png", "size": 1460334 }, { "id": 105, "filename": "Gemini_Generated_Image_ba74b3ba74b3ba74.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_ba74b3ba74b3ba74.png", "size": 1572008 }, { "id": 106, "filename": "Gemini_Generated_Image_bm37pbm37pbm37pb.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_bm37pbm37pbm37pb.png", "size": 2364906 }, { "id": 107, "filename": "Gemini_Generated_Image_bshrdnbshrdnbshr.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_bshrdnbshrdnbshr.png", "size": 5602877 }, { "id": 108, "filename": "Gemini_Generated_Image_c1ykoc1ykoc1ykoc-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_c1ykoc1ykoc1ykoc-Photoroom.png", "size": 1077281 }, { "id": 109, "filename": "Gemini_Generated_Image_c1ykoc1ykoc1ykoc.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_c1ykoc1ykoc1ykoc.png", "size": 5613371 }, { "id": 110, "filename": "Gemini_Generated_Image_cmzjvgcmzjvgcmzj.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_cmzjvgcmzjvgcmzj.png", "size": 2843364 }, { "id": 111, "filename": "Gemini_Generated_Image_d3dc7ld3dc7ld3dc.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_d3dc7ld3dc7ld3dc.png", "size": 7340893 }, { "id": 112, "filename": "Gemini_Generated_Image_d5xpwvd5xpwvd5xp.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_d5xpwvd5xpwvd5xp.png", "size": 5693779 }, { "id": 113, "filename": "Gemini_Generated_Image_dkk0xwdkk0xwdkk0.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_dkk0xwdkk0xwdkk0.png", "size": 6902041 }, { "id": 114, "filename": "Gemini_Generated_Image_e0f7kme0f7kme0f7.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_e0f7kme0f7kme0f7.png", "size": 7479348 }, { "id": 115, "filename": "Gemini_Generated_Image_eqbluceqbluceqbl.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_eqbluceqbluceqbl.png", "size": 4988469 }, { "id": 116, "filename": "Gemini_Generated_Image_esyz8jesyz8jesyz-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_esyz8jesyz8jesyz-Photoroom.png", "size": 1459018 }, { "id": 117, "filename": "Gemini_Generated_Image_esyz8jesyz8jesyz.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_esyz8jesyz8jesyz.png", "size": 1735302 }, { "id": 118, "filename": "Gemini_Generated_Image_faa73rfaa73rfaa7.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_faa73rfaa73rfaa7.png", "size": 8792032 }, { "id": 119, "filename": "Gemini_Generated_Image_ffbox6ffbox6ffbo.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_ffbox6ffbox6ffbo.png", "size": 1777037 }, { "id": 120, "filename": "Gemini_Generated_Image_fx9dw2fx9dw2fx9d.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_fx9dw2fx9dw2fx9d.png", "size": 1412071 }, { "id": 121, "filename": "Gemini_Generated_Image_g0ur7gg0ur7gg0ur.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_g0ur7gg0ur7gg0ur.png", "size": 1345812 }, { "id": 122, "filename": "Gemini_Generated_Image_gyuzqcgyuzqcgyuz.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_gyuzqcgyuzqcgyuz.png", "size": 8691873 }, { "id": 123, "filename": "Gemini_Generated_Image_h02o4sh02o4sh02o.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_h02o4sh02o4sh02o.png", "size": 6597297 }, { "id": 124, "filename": "Gemini_Generated_Image_h3brnch3brnch3br.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_h3brnch3brnch3br.png", "size": 1180866 }, { "id": 125, "filename": "Gemini_Generated_Image_hpc0athpc0athpc0.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_hpc0athpc0athpc0.png", "size": 1569445 }, { "id": 126, "filename": "Gemini_Generated_Image_imnavximnavximna.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_imnavximnavximna.png", "size": 1446319 }, { "id": 127, "filename": "Gemini_Generated_Image_j2z1h4j2z1h4j2z1.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_j2z1h4j2z1h4j2z1.png", "size": 7531346 }, { "id": 128, "filename": "Gemini_Generated_Image_kb3cttkb3cttkb3c-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kb3cttkb3cttkb3c-Photoroom.png", "size": 484059 }, { "id": 129, "filename": "Gemini_Generated_Image_kb3cttkb3cttkb3c.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kb3cttkb3cttkb3c.png", "size": 6263464 }, { "id": 130, "filename": "Gemini_Generated_Image_kbqvlqkbqvlqkbqv.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kbqvlqkbqvlqkbqv.png", "size": 6083482 }, { "id": 131, "filename": "Gemini_Generated_Image_kc0ajlkc0ajlkc0a-Photoroom.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": true, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kc0ajlkc0ajlkc0a-Photoroom.png", "size": 1071244 }, { "id": 132, "filename": "Gemini_Generated_Image_kc0ajlkc0ajlkc0a.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kc0ajlkc0ajlkc0a.png", "size": 4999478 }, { "id": 133, "filename": "Gemini_Generated_Image_kiletkiletkiletk.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_kiletkiletkiletk.png", "size": 2263856 }, { "id": 134, "filename": "Gemini_Generated_Image_l6xd1hl6xd1hl6xd.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_l6xd1hl6xd1hl6xd.png", "size": 1807532 }, { "id": 135, "filename": "Gemini_Generated_Image_lt1rkmlt1rkmlt1r.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_lt1rkmlt1rkmlt1r.png", "size": 1296488 }, { "id": 136, "filename": "Gemini_Generated_Image_m4oxikm4oxikm4ox.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_m4oxikm4oxikm4ox.png", "size": 4667213 }, { "id": 137, "filename": "Gemini_Generated_Image_n01fxun01fxun01f.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_n01fxun01fxun01f.png", "size": 1427207 }, { "id": 138, "filename": "Gemini_Generated_Image_p228vop228vop228.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_p228vop228vop228.png", "size": 7413369 }, { "id": 139, "filename": "Gemini_Generated_Image_pfpcwjpfpcwjpfpc.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_pfpcwjpfpcwjpfpc.png", "size": 1936264 }, { "id": 140, "filename": "Gemini_Generated_Image_pl1meapl1meapl1m.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_pl1meapl1meapl1m.png", "size": 3002182 }, { "id": 141, "filename": "Gemini_Generated_Image_po23ihpo23ihpo23.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_po23ihpo23ihpo23.png", "size": 9869706 }, { "id": 142, "filename": "Gemini_Generated_Image_prbbcwprbbcwprbb.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_prbbcwprbbcwprbb.png", "size": 5372709 }, { "id": 143, "filename": "Gemini_Generated_Image_qs1vk3qs1vk3qs1v.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_qs1vk3qs1vk3qs1v.png", "size": 6149525 }, { "id": 144, "filename": "Gemini_Generated_Image_qttxdyqttxdyqttx.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_qttxdyqttxdyqttx.png", "size": 1730947 }, { "id": 145, "filename": "Gemini_Generated_Image_r55emzr55emzr55e.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_r55emzr55emzr55e.png", "size": 7035749 }, { "id": 146, "filename": "Gemini_Generated_Image_rph36srph36srph3.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_rph36srph36srph3.png", "size": 6440108 }, { "id": 147, "filename": "Gemini_Generated_Image_y1bz5xy1bz5xy1bz.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_y1bz5xy1bz5xy1bz.png", "size": 3925088 }, { "id": 148, "filename": "Gemini_Generated_Image_sdb8x3sdb8x3sdb8.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_sdb8x3sdb8x3sdb8.png", "size": 2100054 }, { "id": 149, "filename": "Gemini_Generated_Image_sq7zousq7zousq7z.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_sq7zousq7zousq7z.png", "size": 0 }, { "id": 150, "filename": "Gemini_Generated_Image_tmcl4atmcl4atmcl.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_tmcl4atmcl4atmcl.png", "size": 0 }, { "id": 151, "filename": "Gemini_Generated_Image_tx1ds0tx1ds0tx1d.png", "source": "Gemini", "date": null, "time": null, "ext": "png", "mime_type": "image/png", "photoroom_edited": false, "path": "/Users/wond_erwall/Downloads/Gemini_Generated_Image_tx1ds0tx1ds0tx1d.png", "size": 0 }] };
+
+    const files = DB.files;
+    let W = window.innerWidth, H = window.innerHeight;
+    let positions = {};
+    let currentSort = 'date';
+
+    // 날짜 고유값 목록
+    const dates = [...new Set(files.map(f => f.date).filter(Boolean))].sort();
+    const dateIndex = {};
+    dates.forEach((d, i) => dateIndex[d] = i);
+
+    function getNodeColor(f) {
+      if (!f.date) return '#ccc';
+      const dt = new Date(f.date);
+      if (isNaN(dt.getTime())) return '#ccc';
+      const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#6366f1', '#a855f7'];
+      return colors[dt.getDay()];
+    }
+
+    function getNodeSize(f) {
+      const min = 8, max = 200;
+      const maxSize = Math.max(...DB.files.map(x => x.size || 0), 1);
+      const size = f.size || 0;
+      // Create a slight curve so small files are still visible
+      return min + ((max - min) * Math.sqrt(size / maxSize));
+    }
+
+    // 랜덤 시드 기반 위치 (재현 가능)
+    function seededRandom(seed) {
+      let s = seed;
+      return function () {
+        s = (s * 9301 + 49297) % 233280;
+        return s / 233280;
+      };
+    }
+
+    function computePositions(sortMode) {
+      const pos = {};
+      const margin = 100;
+      const colCount = 7;
+      const colWidth = (W - margin * 2) / colCount;
+      const startX = margin + colWidth / 2;
+
+      // 요일별로 그룹 (0: 일, 1: 월, ..., 6: 토)
+      const columns = [[], [], [], [], [], [], []];
+
+      files.forEach(f => {
+        if (f.date) {
+          const dt = new Date(f.date);
+          if (!isNaN(dt.getTime())) {
+            columns[dt.getDay()].push(f);
+          }
+        }
+      });
+
+      columns.forEach((col, c) => {
+        col.sort((a, b) => {
+          const dtA = (a.date || '9999-99-99') + '_' + (a.time || '');
+          const dtB = (b.date || '9999-99-99') + '_' + (b.time || '');
+          return dtA.localeCompare(dtB) || a.filename.localeCompare(b.filename);
+        });
+
+        const startY = 160;
+        const rowStep = (H - startY - margin) / Math.max(col.length - 1, 1);
+
+        col.forEach((f, r) => {
+          const rng = seededRandom(f.id * 137);
+          const x = startX + c * colWidth + (rng() - 0.5) * (colWidth * 0.5);
+          const y = startY + r * rowStep + (rng() - 0.5) * 15;
+          pos[f.id] = { x, y };
+        });
+      });
+
+      return pos;
+    }
+
+    function buildEdges(files) {
+      const edges = [];
+
+      // 요일별 그룹
+      const columns = [[], [], [], [], [], [], []];
+      files.forEach(f => {
+        if (f.date) {
+          const dt = new Date(f.date);
+          if (!isNaN(dt.getTime())) columns[dt.getDay()].push(f);
+        }
+      });
+
+      // 각 요일별로 정렬 순서에 맞춰 라인 연결
+      columns.forEach(col => {
+        col.sort((a, b) => {
+          const dtA = (a.date || '9999-99-99') + '_' + (a.time || '');
+          const dtB = (b.date || '9999-99-99') + '_' + (b.time || '');
+          return dtA.localeCompare(dtB) || a.filename.localeCompare(b.filename);
+        });
+
+        for (let i = 0; i < col.length - 1; i++) {
+          edges.push({ a: col[i].id, b: col[i + 1].id, color: '#9ca3af', opacity: 0.3, width: 1.5 });
+        }
+      });
+
+      return edges;
+    }
+
+    function renderLines(edges, pos) {
+      const svg = document.getElementById('lines');
+      const wrap = document.getElementById('canvas-wrap');
+      svg.setAttribute('viewBox', `0 0 ${wrap.offsetWidth} ${wrap.offsetHeight}`);
+      svg.innerHTML = edges.map(e => {
+        const a = pos[e.a], b = pos[e.b];
+        if (!a || !b) return '';
+        const ax = a.x, ay = a.y;
+        const bx = b.x, by = b.y;
+        return `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="${e.color}" stroke-opacity="${e.opacity}" stroke-width="${e.width}"/>`;
+      }).join('');
+    }
+
+    function renderNodes(pos) {
+      const container = document.getElementById('nodes');
+      container.innerHTML = '';
+
+
+
+      files.forEach(f => {
+        const p = pos[f.id];
+        if (!p) return;
+        const size = getNodeSize(f);
+        const color = getNodeColor(f);
+        const div = document.createElement('div');
+        div.className = 'node';
+        div.style.width = size + 'px';
+        div.style.height = size + 'px';
+
+        if (f.ext === 'png') {
+          div.style.background = color;
+          div.style.border = `2px dashed ${color}`;
+          div.style.opacity = '0.3';
+        } else {
+          div.style.background = color;
+        }
+
+        div.style.left = p.x + 'px';
+        div.style.top = p.y + 'px';
+        div.style.zIndex = Math.round(size);
+        div.dataset.id = f.id;
+
+
+
+        div.addEventListener('mouseenter', (e) => showTooltip(e, f));
+        div.addEventListener('mousemove', (e) => moveTooltip(e));
+        div.addEventListener('mouseleave', hideTooltip);
+
+        container.appendChild(div);
+      });
+    }
+
+    function showTooltip(e, f) {
+      const tt = document.getElementById('tooltip');
+      const imgWrap = document.getElementById('tt-img-wrap');
+      imgWrap.style.display = 'none';
+      document.getElementById('tt-name').textContent = f.filename;
+      document.getElementById('tt-info').innerHTML =
+        `source: ${f.source}<br>` +
+        (f.date ? `date: ${f.date} ${f.time || ''}<br>` : '') +
+        `ext: ${f.ext}<br>` +
+        (f.size ? `size: ${(f.size / 1024).toFixed(0)} KB<br>` : '') +
+        (f.photoroom_edited ? `✂ photoroom edited` : '');
+      tt.style.display = 'block';
+      moveTooltip(e);
+    }
+
+    function moveTooltip(e) {
+      const tt = document.getElementById('tooltip');
+      let x = e.clientX + 16, y = e.clientY - 10;
+      if (x + 240 > window.innerWidth) x = e.clientX - 240;
+      if (y + 260 > window.innerHeight) y = e.clientY - 260;
+      tt.style.left = x + 'px';
+      tt.style.top = y + 'px';
+    }
+
+    function hideTooltip() {
+      document.getElementById('tooltip').style.display = 'none';
+    }
+
+    function setSort(mode) {
+      currentSort = mode;
+      document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+
+      positions = computePositions(mode);
+      const edges = buildEdges(files);
+      renderLines(edges, positions);
+      renderNodes(positions);
+    }
+
+    let engine, runner;
+    let nodeBodies = {};
+    let activeEdges = [];
+
+    function initPhysics() {
+      if (engine) {
+        Matter.Engine.clear(engine);
+        if (runner) Matter.Runner.stop(runner);
+      }
+
+      const { Engine, World, Bodies, Body, Runner, Events } = Matter;
+      engine = Engine.create();
+      const world = engine.world;
+
+      // 시작 시에는 무중력
+      world.gravity.y = 0;
+      world.gravity.x = 0;
+
+      // 바닥과 양옆 벽 생성
+      const wallOpts = { isStatic: true, render: { visible: false }, friction: 0.1, restitution: 0.5 };
+      const thickness = 100;
+      World.add(world, [
+        Bodies.rectangle(W / 2, H + thickness / 2, W * 4, thickness, wallOpts), // Bottom
+        Bodies.rectangle(-thickness / 2, H / 2, thickness, H * 4, wallOpts), // Left
+        Bodies.rectangle(W + thickness / 2, H / 2, thickness, H * 4, wallOpts) // Right
+      ]);
+
+      files.forEach(f => {
+        const p = positions[f.id];
+        if (!p) return;
+        const r = getNodeSize(f) / 2;
+        // 반발력 0.9로 튕김성 극대화, 마찰력 제거
+        const body = Bodies.circle(p.x, p.y, r, {
+          restitution: 0.9,
+          frictionAir: 0.05,
+          friction: 0.005,
+          density: 0.01
+        });
+        // 약간의 초기 속도로 자기들끼리 밀어내기 시작
+        Body.setVelocity(body, { x: (Math.random() - 0.5) * 4, y: (Math.random() - 0.5) * 4 });
+
+        const dom = document.querySelector(`[data-id="${f.id}"]`);
+        // 드래그 인터랙션 추가
+        dom.addEventListener('mousedown', e => {
+          e.preventDefault();
+          draggedBody = body;
+        });
+
+        nodeBodies[f.id] = { dom, body, orig: { x: p.x, y: p.y } };
+        World.add(world, body);
+      });
+
+      runner = Runner.create();
+      Runner.run(runner, engine);
+
+      Events.on(engine, 'afterUpdate', function () {
+        let updateEdges = false;
+        files.forEach(f => {
+          const nb = nodeBodies[f.id];
+          if (!nb || !nb.dom) return;
+          const pos = nb.body.position;
+
+          if (world.gravity.y === 0) {
+            // 원래 자리 주변에서 맴돌도록 아주 약한 스프링 장력 + 랜덤 무작위성 (부딪힘 유도)
+            const forceX = (nb.orig.x - pos.x) * 0.000015 + (Math.random() - 0.5) * 0.0002;
+            const forceY = (nb.orig.y - pos.y) * 0.000015 + (Math.random() - 0.5) * 0.0002;
+            Body.applyForce(nb.body, pos, { x: forceX, y: forceY });
+          }
+
+          nb.dom.style.left = pos.x + 'px';
+          nb.dom.style.top = pos.y + 'px';
+
+          if (Math.abs(positions[f.id].x - pos.x) > 0.5 || Math.abs(positions[f.id].y - pos.y) > 0.5) {
+            positions[f.id].x = pos.x;
+            positions[f.id].y = pos.y;
+            updateEdges = true;
+          }
+        });
+
+        if (updateEdges) {
+          renderLines(activeEdges, positions);
+        }
+      });
+
+      // 15초 후에 중력 발생 및 와르르 쏟아짐
+      setTimeout(() => {
+        world.gravity.y = 1.2;
+        Object.values(nodeBodies).forEach(nb => {
+          // 쏟아지고 바닥에 닿은 후 계속 부딪치며 움직이지 않도록 탄성 감소
+          nb.body.restitution = 0.1;
+          nb.body.friction = 0.8;
+          Body.setVelocity(nb.body, { x: (Math.random() - 0.5) * 15, y: -Math.random() * 15 });
+        });
+      }, 15000);
+    }
+
+    let draggedBody = null;
+
+    // 전역 마우스 드래그 이벤트 (원을 잡고 옮기기)
+    document.addEventListener('mousemove', e => {
+      if (draggedBody) {
+        Matter.Body.setPosition(draggedBody, { x: e.clientX, y: e.clientY });
+        Matter.Body.setVelocity(draggedBody, { x: 0, y: 0 }); // 드래그 중 제멋대로 움직임 방지
+      }
+    });
+    document.addEventListener('mouseup', () => { draggedBody = null; });
+
+    // 초기 렌더
+    document.getElementById('count-label').textContent = `${files.length} files · HF ${DB.metadata.hf_count} · Gemini ${DB.metadata.gemini_count}`;
+    positions = computePositions('date');
+    activeEdges = buildEdges(files);
+    renderLines(activeEdges, positions);
+    renderNodes(positions);
+
+    initPhysics();
+  </script>
+</body>
+
+</html>
